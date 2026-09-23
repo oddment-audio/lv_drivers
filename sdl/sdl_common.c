@@ -30,6 +30,12 @@ static bool left_button_down = false;
 static int16_t last_x = 0;
 static int16_t last_y = 0;
 
+/* Set on every press event. A short tap can be fully pumped (down + up)
+ * between two indev reads, leaving left_button_down false at both reads —
+ * the tap would be invisible to LVGL. This flag lets sdl_mouse_read
+ * synthesize one pressed report for it. */
+static bool press_pending = false;
+
 static int16_t wheel_diff = 0;
 static lv_indev_state_t wheel_state = LV_INDEV_STATE_RELEASED;
 
@@ -50,7 +56,16 @@ void sdl_mouse_read(lv_indev_drv_t * indev_drv, lv_indev_data_t * data)
     /*Store the collected data*/
     data->point.x = last_x;
     data->point.y = last_y;
-    data->state = left_button_down ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+    if(!left_button_down && press_pending) {
+        /* A complete tap happened since the last read: report one pressed
+         * cycle so the click registers, and have LVGL call back immediately
+         * for the release. */
+        data->state = LV_INDEV_STATE_PRESSED;
+        data->continue_reading = true;
+    } else {
+        data->state = left_button_down ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+    }
+    press_pending = false;
 }
 
 
@@ -121,6 +136,7 @@ void mouse_handler(SDL_Event * event)
         case SDL_MOUSEBUTTONDOWN:
             if(event->button.button == SDL_BUTTON_LEFT) {
                 left_button_down = true;
+                press_pending = true;
                 last_x = event->motion.x / SDL_ZOOM;
                 last_y = event->motion.y / SDL_ZOOM;
             }
@@ -137,6 +153,7 @@ void mouse_handler(SDL_Event * event)
             break;
         case SDL_FINGERDOWN:
             left_button_down = true;
+            press_pending = true;
             last_x = LV_HOR_RES * event->tfinger.x / SDL_ZOOM;
             last_y = LV_VER_RES * event->tfinger.y / SDL_ZOOM;
             break;
